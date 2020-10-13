@@ -10,8 +10,6 @@ dependencies:
     -pandas>=0.23.1
     -pillow
     -imageio
-    -pip:
-      -git+https://github.com/daavoo/pyntcloud#egg=pyntcloud-0.1.0
     -scipy>=1.4.0
     -shapely
     -sklearn
@@ -19,3 +17,6 @@ dependencies:
     -h5py
     -lap
     -joblib
+    -pip
+    -pip:
+        -git+https://github.com/daavoo/pyntcloud#egg=pyntcloud-0.1.0
