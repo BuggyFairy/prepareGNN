@@ -1,7 +1,7 @@
 # Ignoring data files #
 #######################
 *.pkl
-*.npy
+*.csv
 
 # We'll ignore all of the following:
 
@@ -9,7 +9,7 @@ dist/*
 
 .DS_Store
 .idea
-map_files/*
+
 *.jpg
 !/images/*.jpg
 !/docs/_images/*.jpg
@@ -21,7 +21,6 @@ htmlcov
 
 utils/__pycache__/*
 prediction/__pycache__/*
-map_files/__pycache__/*
 top_k_prediction/__pycache__/*
 argoverse.egg-info/top_level.txt
 argoverse.egg-info/SOURCES.txt
@@ -32,7 +31,6 @@ argoverse.egg-info/dependency_links.txt
 *.log
 .tox/*
 tests/test_data/tmp
-._map_files
 .eggs/
 /sphinx/source
 /docs/.buildinfo
