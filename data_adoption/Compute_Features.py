@@ -287,7 +287,7 @@ if __name__ == "__main__":
 
     num_sequences = _FEATURES_SMALL_SIZE if args.small else len(sequences)
 
-    Parallel(n_jobs=-2)(delayed(load_seq_save_features)(
+    Parallel(n_jobs=20)(delayed(load_seq_save_features)(
         i,
         sequences,
         temp_save_dir,
