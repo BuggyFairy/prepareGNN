@@ -69,5 +69,5 @@ setup(
         "joblib",
     ],
     # for older pip version, use with --process-dependency-links
-    dependency_links=["git+https://github.com/daavoo/pyntcloud#egg=pyntcloud-0.1.0"],
+    # dependency_links=["git+https://github.com/daavoo/pyntcloud#egg=pyntcloud-0.1.0"],
 )
