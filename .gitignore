@@ -4,6 +4,7 @@
 *.csv
 
 # We'll ignore all of the following:
+/resources/*
 
 dist/*
 

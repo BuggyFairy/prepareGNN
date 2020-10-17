@@ -152,15 +152,17 @@ def compute_features(
     for idx, track_id in enumerate(unique_track_ids):
         df.loc[df['TRACK_ID'] == track_id, 'ADJACENCY_NUM'] = idx
 
-    # Get social and map features for the agent
     track_ids = np.unique(df["TRACK_ID"].values)
+
+    reference_timestamps = np.unique(df["TIMESTAMP"].values)
 
     all_features = np.ndarray(shape=(0, 50, 11))
     all_map_feature_helpers = []
 
-    reference_timestamps = np.unique(df["TIMESTAMP"].values)
+
     for idx, track in enumerate(track_ids):
 
+        # track = '00000000-0000-0000-0000-000000043117'
         print(f"Handle Track ID: {track} of Sequence: {seq_path}. {idx+1}/{len(track_ids)}")
 
         # agent_track = df[df["OBJECT_TYPE"] == "AGENT"].values
@@ -190,7 +192,7 @@ def compute_features(
                     while value_x is None:
                         if look_up > 0:
                             look_up -= 1
-                        if look_down < 49:
+                        if look_down < len(reference_timestamps) - 1:
                             look_down += 1
                         value_x = filled_current_track[look_down, 3]
                         value_y = filled_current_track[look_down, 4]
@@ -287,7 +289,7 @@ if __name__ == "__main__":
 
     num_sequences = _FEATURES_SMALL_SIZE if args.small else len(sequences)
 
-    Parallel(n_jobs=20)(delayed(load_seq_save_features)(
+    Parallel(n_jobs=2)(delayed(load_seq_save_features)(
         i,
         sequences,
         temp_save_dir,
