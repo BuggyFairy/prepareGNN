@@ -1,10 +1,12 @@
 # Ignoring data files #
 #######################
 *.pkl
-*.csv
 
 # We'll ignore all of the following:
-/resources/*
+/resources/argodata/mymodel/features/*
+/resources/argodata/test/backup/*
+/resources/argodata/test/test_obs/*
+/resources/argodata/val/val/*
 
 dist/*
 
