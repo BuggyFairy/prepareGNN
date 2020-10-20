@@ -15,9 +15,13 @@ from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 
-from data_adoption.Feature_Config import RAW_DATA_FORMAT, _FEATURES_SMALL_SIZE
+from data_adoption.Feature_Config import RAW_DATA_FORMAT, _FEATURES_SMALL_SIZE, FEATURE_FORMAT_MASTER_THESIS, \
+    EXTENDED_RAW_DATA_FORMAT
 from data_adoption.map.MapFeaturesUtils import MapFeaturesUtils
 from data_adoption.social.SocialFeaturesUtils import SocialFeaturesUtils
+
+FAIL = '\033[91m'
+ENDC = '\033[0m'
 
 
 def parse_arguments() -> Any:
@@ -85,6 +89,8 @@ def load_seq_save_features(
         if not seq.endswith(".csv"):
             continue
 
+        print(f"{FAIL}Will handle {start_idx}/{len(sequences)} Sequenes{ENDC}")
+
         file_path = f"{args.data_dir}/{seq}"
         seq_id = int(seq.split(".")[0])
 
@@ -107,9 +113,10 @@ def load_seq_save_features(
             list_oracle_candidate_nt_distances,
         ])
 
-        print(
-            f"{args.mode}:{count}/{args.batch_size} with start {start_idx} and end {start_idx + args.batch_size}"
-        )
+
+        # print(
+        #     f"{args.mode}:{count}/{args.batch_size} with start {start_idx} and end {start_idx + args.batch_size}"
+        # )
 
     data_df = pd.DataFrame(
         data,
@@ -146,81 +153,61 @@ def compute_features(
     args = parse_arguments()
     df = pd.read_csv(seq_path, dtype={"TIMESTAMP": str})
 
+    all_track_ids = np.unique(df["TRACK_ID"].values)
+
+    original_tracks = 0
+    interpolated_tracks = 0
+    discarded_tracks = 0
+
+    filtered_relevant_tracks = np.ndarray((0, args.obs_len + args.pred_len, len(RAW_DATA_FORMAT)))
+
+    reference_timestamps = np.unique(df["TIMESTAMP"])
+    for track_id in all_track_ids:
+        current_track = df[df["TRACK_ID"] == track_id].values
+        if current_track.shape[0] == 50:
+            current_track = np.expand_dims(current_track, axis=0)
+            filtered_relevant_tracks = np.concatenate((filtered_relevant_tracks, current_track), axis=0)
+            original_tracks += 1
+
+        elif current_track.shape[0] >= 40 and current_track.shape[0] < 50:
+            interpolated_track = interpolate_track(current_track, reference_timestamps)
+            current_track = np.expand_dims(interpolated_track, axis=0)
+            filtered_relevant_tracks = np.concatenate((filtered_relevant_tracks, current_track), axis=0)
+            interpolated_tracks += 1
+        else:
+            discarded_tracks += 1
+
+    filtered_df = pd.DataFrame(data=filtered_relevant_tracks.reshape(-1, len(RAW_DATA_FORMAT)), columns=RAW_DATA_FORMAT)
     # Neue Spalte einfügen, damit TRACK_IDs eindeutige (einfachere) Nummern in der Adjazenz-Matrix bekommen
-    unique_track_ids = np.unique(df['TRACK_ID'])
-    df.loc[:, 'ADJACENCY_NUM'] = -1
+    unique_track_ids = np.unique(filtered_df['TRACK_ID'])
+    filtered_df.loc[:, 'ADJACENCY_NUM'] = -1
     for idx, track_id in enumerate(unique_track_ids):
-        df.loc[df['TRACK_ID'] == track_id, 'ADJACENCY_NUM'] = idx
+        filtered_df.loc[filtered_df['TRACK_ID'] == track_id, 'ADJACENCY_NUM'] = idx
 
-    track_ids = np.unique(df["TRACK_ID"].values)
+    social_tracks_obs, social_features = social_features_utils_instance.compute_social_features(
+       filtered_df, args.obs_len, args.obs_len + args.pred_len,
+       EXTENDED_RAW_DATA_FORMAT)
 
-    reference_timestamps = np.unique(df["TIMESTAMP"].values)
+    # agent_track will be used to compute n-t distances for future trajectory,
+    # using centerlines obtained from observed trajectory
+    '''
+    Die map_features enthalten die tangential und normal-Werte. map_feature_helpers enthalten die Koordinaten der 
+    Mittellinien, auf die sich die nt-Werte beziehen. Mit Hilfe der Stadt und den Koordinaten kann so die Strecke
+    rekonstruiert werden. Die Dimension der map_feature_helpers können die von seq_len überschreiten, da sie die 
+    Koordinaten von allen Mittellinien (einzeln) enthalten. Sie haben nichts mit Zeitschritten zu tun.
+    '''
 
-    all_features = np.ndarray(shape=(0, 50, 11))
-    all_map_feature_helpers = []
+    print(f"For sequence {seq_path} we kept {original_tracks} original, {interpolated_tracks} interpolated, and discarded {discarded_tracks} tracks."
+          f" We kept {(original_tracks + interpolated_tracks)}/{len(all_track_ids)} tracks")
 
+    final_filtered_track_ids = np.unique(filtered_df["TRACK_ID"])
+    final_tracks = np.ndarray((0, args.obs_len + args.pred_len, len(FEATURE_FORMAT_MASTER_THESIS) - 2))
+    counter = 1
+    map_features_helpers_list = []
+    for track_id in final_filtered_track_ids:
+        print(f"Will handle track {track_id} of sequence {seq_path}. This is Track {counter}/{len(final_filtered_track_ids)}.")
+        current_track = filtered_df[filtered_df["TRACK_ID"] == track_id].values
 
-    for idx, track in enumerate(track_ids):
-
-        # track = '00000000-0000-0000-0000-000000043117'
-        print(f"Handle Track ID: {track} of Sequence: {seq_path}. {idx+1}/{len(track_ids)}")
-
-        # agent_track = df[df["OBJECT_TYPE"] == "AGENT"].values
-        current_track = df[df["TRACK_ID"] == track].values
-
-        """ Interpoliere unvollständige Daten """
-        if len(current_track) < len(reference_timestamps):
-            filled_current_track = np.full( (len(reference_timestamps), 7), None)
-            index_available_timestamp = []
-            for timestamp in reference_timestamps:
-                index = np.where(current_track[:, 0] == timestamp)[0]
-                if index.size != 0:
-                    index_available_timestamp.append(index.item(0))
-            filled_current_track[index_available_timestamp] = current_track
-            filled_current_track[:, 0] = reference_timestamps
-            filled_current_track[:, 1] = filled_current_track[0, 1]
-            filled_current_track[:, 2] = filled_current_track[0, 2]
-            filled_current_track[:, 5] = filled_current_track[0, 5]
-            filled_current_track[:, 6] = filled_current_track[0, 6]
-            for row in filled_current_track:
-                if row[3] is None:
-                    value_x = None
-                    value_y = None
-                    idx = np.where(row[0] == reference_timestamps)[0].item(0)
-                    look_up = idx
-                    look_down = idx
-                    while value_x is None:
-                        if look_up > 0:
-                            look_up -= 1
-                        if look_down < len(reference_timestamps) - 1:
-                            look_down += 1
-                        value_x = filled_current_track[look_down, 3]
-                        value_y = filled_current_track[look_down, 4]
-                        if value_x is None:
-                            value_x = filled_current_track[look_up, 3]
-                            value_y = filled_current_track[look_up, 4]
-                    filled_current_track[idx, 3] = value_x
-                    filled_current_track[idx, 4] = value_y
-            current_track = filled_current_track
-        """ Interpolation zuende """
-
-        # Social features are computed using only the observed trajectory
-        # social_features, adjacenies, distances = social_features_utils_instance.compute_social_features(
-        #     df, agent_track, args.obs_len, args.obs_len + args.pred_len,
-        #     RAW_DATA_FORMAT)
-
-        social_features = social_features_utils_instance.compute_social_features(
-           df, current_track, args.obs_len, args.obs_len + args.pred_len,
-           RAW_DATA_FORMAT)
-
-        # agent_track will be used to compute n-t distances for future trajectory,
-        # using centerlines obtained from observed trajectory
-        '''
-        Die map_features enthalten die tangential und normal-Werte. map_feature_helpers enthalten die Koordinaten der 
-        Mittellinien, auf die sich die nt-Werte beziehen. Mit Hilfe der Stadt und den Koordinaten kann so die Strecke
-        rekonstruiert werden. Die Dimension der map_feature_helpers können die von seq_len überschreiten, da sie die 
-        Koordinaten von allen Mittellinien (einzeln) enthalten. Sie haben nichts mit Zeitschritten zu tun.
-        '''
         map_features, map_feature_helpers = map_features_utils_instance.compute_map_features(
             current_track,
             args.obs_len,
@@ -229,25 +216,16 @@ def compute_features(
             args.mode,
         )
 
-        # Combine social and map features
+        # auxiliary_track = np.full((args.obs_len + args.pred_len, current_track.shape[1] + map_features.shape[1]), None)
+        auxiliary_track = np.concatenate((current_track, map_features), axis=1)
+        auxiliary_track = np.expand_dims(auxiliary_track, axis=0)
+        final_tracks = np.concatenate((final_tracks, auxiliary_track), axis=0)
 
-        # If track is of OBS_LEN (i.e., if it's in test mode), use agent_track of full SEQ_LEN,
-        # But keep (OBS_LEN+1) to (SEQ_LEN) indexes having None values
-        if current_track.shape[0] == args.obs_len:
-            agent_track_seq = np.full((args.obs_len + args.pred_len, current_track.shape[1]), None)
-            agent_track_seq[:args.obs_len] = current_track
-            merged_features = np.concatenate((agent_track_seq, social_features, map_features), axis=1)
-            # merged_features = np.concatenate((agent_track_seq, map_features), axis=1)
-        else:
-            merged_features = np.concatenate((current_track, social_features, map_features), axis=1)
-            # merged_features = np.concatenate((current_track, map_features), axis=1)
+        map_features_helpers_list.append(map_feature_helpers)
+        counter += 1
 
-        merged_features = np.expand_dims(merged_features, axis=0)
-        all_features = np.concatenate( (all_features, merged_features), axis=0)
-        all_map_feature_helpers.append(map_feature_helpers)
-
-    # return merged_features, adjacenies, distances, map_feature_helpers
-    return all_features, all_map_feature_helpers
+    merged_features = np.concatenate((final_tracks, social_features), axis=2)
+    return merged_features, map_features_helpers_list
 
 
 def merge_saved_features(batch_save_dir: str) -> None:
@@ -275,6 +253,44 @@ def merge_saved_features(batch_save_dir: str) -> None:
         f"{args.feature_dir}/forecasting_features_{args.mode}.pkl")
 
 
+def interpolate_track(track, reference_timestamps):
+    """ Interpoliere unvollständige Daten """
+    if len(track) < len(reference_timestamps):
+        filled_current_track = np.full( (len(reference_timestamps), len(RAW_DATA_FORMAT)), None)
+        index_available_timestamp = []
+        for timestamp in reference_timestamps:
+            index = np.where(track[:, 0] == timestamp)[0]
+            if index.size != 0:
+                index_available_timestamp.append(np.where(reference_timestamps == timestamp)[0].item(0))
+        filled_current_track[index_available_timestamp] = track
+        filled_current_track[:, 0] = reference_timestamps
+        filled_current_track[:, 1] = track[0, 1]
+        filled_current_track[:, 2] = track[0, 2]
+        filled_current_track[:, 5] = track[0, 5]
+        for row in filled_current_track:
+            if row[3] is None:
+                value_x = None
+                value_y = None
+                idx = np.where(row[0] == reference_timestamps)[0].item(0)
+                look_up = idx
+                look_down = idx
+                while value_x is None:
+                    if look_up > 0:
+                        look_up -= 1
+                    if look_down < len(reference_timestamps) - 1:
+                        look_down += 1
+                    value_x = filled_current_track[look_down, 3]
+                    value_y = filled_current_track[look_down, 4]
+                    if value_x is None:
+                        value_x = filled_current_track[look_up, 3]
+                        value_y = filled_current_track[look_up, 4]
+                filled_current_track[idx, 3] = value_x
+                filled_current_track[idx, 4] = value_y
+        track = filled_current_track
+    """ Interpolation zuende """
+    return track
+
+
 if __name__ == "__main__":
     """Load sequences and save the computed features."""
     args = parse_arguments()
@@ -289,7 +305,7 @@ if __name__ == "__main__":
 
     num_sequences = _FEATURES_SMALL_SIZE if args.small else len(sequences)
 
-    Parallel(n_jobs=2)(delayed(load_seq_save_features)(
+    Parallel(n_jobs=-1)(delayed(load_seq_save_features)(
         i,
         sequences,
         temp_save_dir,

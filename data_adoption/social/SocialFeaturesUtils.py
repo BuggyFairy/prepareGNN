@@ -143,13 +143,13 @@ class SocialFeaturesUtils:
                 continue
 
             # Skip if agent track
-            if group_data["OBJECT_TYPE"].iloc[0] == "AGENT":
-                continue
+            # if group_data["OBJECT_TYPE"].iloc[0] == "AGENT":
+            #     continue
 
             # Check if the track is stationary
             """ Wenn sich der Track(Agent, AV, Others) nicht bewegt, dann beachten wir ihn auch nicht weiter"""
-            if self.get_is_track_stationary(group_data):
-                continue
+            # if self.get_is_track_stationary(group_data):
+            #     continue
 
             """ 
             Manche Agents, Others erscheinen sind nicht immer Bestandteil der Aufzeichnung. Sie können die
@@ -161,6 +161,7 @@ class SocialFeaturesUtils:
                                                 obs_len,
                                                 raw_data_format).reshape(
                                                     (1, obs_len, -1))
+
             """ Pack alle gültigen Tracks (AV, Agent, Others) aufeinander """
             social_tracks = np.vstack((social_tracks, padded_track_array))
 
@@ -228,7 +229,7 @@ class SocialFeaturesUtils:
 
     def get_min_distance_front_and_back(
             self,
-            agent_track: np.ndarray,
+            track_id: str,
             social_tracks: np.ndarray,
             obs_len: int,
             raw_data_format: Dict[str, int],
@@ -247,6 +248,7 @@ class SocialFeaturesUtils:
         min_distance_front_and_back = np.full(
             (obs_len, 2), self.DEFAULT_MIN_DIST_FRONT_AND_BACK)
 
+        agent_track = social_tracks[social_tracks[:, :, 1] == track_id]
         # Compute distances for each timestep in the sequence
         for i in range(obs_len):
 
@@ -258,6 +260,9 @@ class SocialFeaturesUtils:
 
             # Compute distances for all the social tracks
             for social_track in social_tracks[:, i, :]:
+
+                if social_track[1] == track_id:
+                    continue
 
                 neigh_x = social_track[raw_data_format["X"]]
                 neigh_y = social_track[raw_data_format["Y"]]
@@ -354,7 +359,6 @@ class SocialFeaturesUtils:
     def compute_social_features(
             self,
             df: pd.DataFrame,
-            agent_track: np.ndarray,
             obs_len: int,
             seq_len: int,
             raw_data_format: Dict[str, int],
@@ -379,18 +383,18 @@ class SocialFeaturesUtils:
         """
 
 
-        agent_ts = np.sort(np.unique(df["TIMESTAMP"].values))
+        unique_ts = np.sort(np.unique(df["TIMESTAMP"].values))
 
-        if agent_ts.shape[0] == obs_len:
+        if unique_ts.shape[0] == obs_len:
             df_obs = df
-            agent_track_obs = agent_track
+            # agent_track_obs = agent_track
 
         else:
             # Get obs dataframe and agent track
-            df_obs = df[df["TIMESTAMP"] < agent_ts[obs_len]]
+            df_obs = df[df["TIMESTAMP"] < unique_ts[obs_len]]
             assert (np.unique(df_obs["TIMESTAMP"].values).shape[0] == obs_len
                     ), "Obs len mismatch"
-            agent_track_obs = agent_track[:obs_len]
+            # agent_track_obs = agent_track[:obs_len]
 
 
 
@@ -399,12 +403,18 @@ class SocialFeaturesUtils:
                                                raw_data_format)
 
         # Get minimum following distance in front and back
-        min_distance_front_and_back_obs = self.get_min_distance_front_and_back(
-            agent_track_obs,
-            social_tracks_obs,
-            obs_len,
-            raw_data_format,
-            viz=False)
+
+        min_distances = np.zeros((0, obs_len, 2))
+        filtered_track_ids = social_tracks_obs[:, 0 ,1]
+        for track_id in filtered_track_ids:
+            min_distance_front_and_back_obs = self.get_min_distance_front_and_back(
+                track_id,
+                social_tracks_obs,
+                obs_len,
+                raw_data_format,
+                viz=False)
+            min_distance_front_and_back_obs = np.expand_dims(min_distance_front_and_back_obs, axis=0)
+            min_distances = np.vstack((min_distances, min_distance_front_and_back_obs))
 
         # Get number of neighbors
         # num_neighbors_obs = self.get_num_neighbors(agent_track_obs,
@@ -415,10 +425,10 @@ class SocialFeaturesUtils:
         # social_features_obs = np.concatenate((min_distance_front_and_back_obs, num_neighbors_obs), axis=1)
         # social_features = np.full((seq_len, social_features_obs.shape[1]), None)
 
-        social_features = np.full((seq_len, min_distance_front_and_back_obs.shape[1]), None)
-        social_features[:obs_len] = min_distance_front_and_back_obs
+        social_features = np.full((len(social_tracks_obs), seq_len, min_distance_front_and_back_obs.shape[2]), None)
+        social_features[:, :obs_len] = min_distances
 
-        return social_features
+        return social_tracks_obs, social_features
         # return social_features, adjacencies, distances
 
 
