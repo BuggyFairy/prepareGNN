@@ -27,6 +27,13 @@ ENDC = '\033[0m'
 def parse_arguments() -> Any:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--cpu",
+        default=-1,
+        type=int,
+        help="Directory where the sequences (csv files) are saved",
+    )
     parser.add_argument(
         "--data_dir",
         default="",
@@ -305,7 +312,7 @@ if __name__ == "__main__":
 
     num_sequences = _FEATURES_SMALL_SIZE if args.small else len(sequences)
 
-    Parallel(n_jobs=-1)(delayed(load_seq_save_features)(
+    Parallel(n_jobs=args.cpu)(delayed(load_seq_save_features)(
         i,
         sequences,
         temp_save_dir,
